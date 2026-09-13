@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -20,7 +21,7 @@ from wechat_stats.config import (
     auto_detect_db_dir,
     ensure_work_dirs,
 )
-from wechat_stats.decrypt import prepare_data
+from wechat_stats.decrypt import ensure_fresh_data, prepare_data
 from wechat_stats.reader import (
     collect_messages,
     detect_my_wxid,
@@ -48,12 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_contacts = sub.add_parser("contacts", help="列出所有有聊天记录的联系人")
     p_contacts.add_argument("--decrypted-dir", type=Path, default=DEFAULT_DECRYPTED_DIR)
+    p_contacts.add_argument("--db-dir", type=Path, help="微信 db_storage 目录")
     p_contacts.add_argument("--search", type=str, help="按名称搜索")
+    p_contacts.add_argument("--no-sync", action="store_true", help="跳过自动同步，直接使用本地缓存")
 
     p_analyze = sub.add_parser("analyze", help="分析指定联系人的聊天统计并生成图表")
     p_analyze.add_argument("contact", type=str, help="联系人备注/昵称/微信号")
     p_analyze.add_argument("--decrypted-dir", type=Path, default=DEFAULT_DECRYPTED_DIR)
+    p_analyze.add_argument("--db-dir", type=Path, help="微信 db_storage 目录")
     p_analyze.add_argument("--output", type=Path, default=PROJECT_ROOT / "output" / "private")
+    p_analyze.add_argument("--no-sync", action="store_true", help="跳过自动同步，直接使用本地缓存")
 
     return parser
 
@@ -63,10 +68,23 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_contacts(args: argparse.Namespace) -> int:
+def _sync_or_fail(args: argparse.Namespace) -> Path | None:
     decrypted_dir = Path(args.decrypted_dir)
-    if not (decrypted_dir / "contact" / "contact.db").exists():
-        print("未找到解密后的数据库。请先运行: python private_chat/main.py prepare")
+    if getattr(args, "no_sync", False):
+        if not (decrypted_dir / "contact" / "contact.db").exists():
+            print("未找到解密后的数据库。请先运行: python private_chat/main.py prepare")
+            return None
+        return decrypted_dir
+    try:
+        return ensure_fresh_data(db_dir=getattr(args, "db_dir", None), decrypted_dir=decrypted_dir)
+    except RuntimeError as exc:
+        print(exc)
+        return None
+
+
+def cmd_contacts(args: argparse.Namespace) -> int:
+    decrypted_dir = _sync_or_fail(args)
+    if decrypted_dir is None:
         return 1
 
     contacts = load_contacts(decrypted_dir)
@@ -90,9 +108,8 @@ def cmd_contacts(args: argparse.Namespace) -> int:
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
-    decrypted_dir = Path(args.decrypted_dir)
-    if not (decrypted_dir / "contact" / "contact.db").exists():
-        print("未找到解密后的数据库。请先运行: python private_chat/main.py prepare")
+    decrypted_dir = _sync_or_fail(args)
+    if decrypted_dir is None:
         return 1
 
     contacts = load_contacts(decrypted_dir)
@@ -114,6 +131,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     stats = compute_stats(contact, messages)
     print()
     print(stats.summary_text())
+    if stats.last_message:
+        today = datetime.now().date()
+        last_day = stats.last_message.date()
+        if last_day < today:
+            print(
+                f"\n[!] 提示: 末条消息为 {last_day}，不含今日数据。"
+                "请在微信 PC 端打开该聊天以同步手机消息，然后重新运行分析。"
+            )
 
     def _to_person(msgs: list) -> list[PersonMessage]:
         return [

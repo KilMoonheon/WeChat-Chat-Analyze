@@ -44,17 +44,20 @@ pip install -r requirements.txt
 
 ## 快速开始
 
-### 第一步：解密数据库（只需一次）
+### 第一步：解密数据库
 
-**保持微信 PC 版运行**，在项目根目录执行（两个模块共用同一命令）：
+**首次使用**需手动解密（保持微信 PC 版运行）：
 
 ```powershell
 python private_chat/main.py prepare
 ```
 
+之后运行 `analyze` / `contacts` / `groups` 时会**自动检测**微信源库是否有更新，有则自动重新解密，无需每次手动 `prepare`。
+
 解密结果保存在 `.wechat_stats/decrypted/`（已在 `.gitignore` 中排除，不会误提交）。
 
-> 若密钥提取失败，请以**管理员身份**运行终端后重试。
+> 若密钥提取失败，请以**管理员身份**运行终端后重试。  
+> 若分析结果缺少今日消息，请先在**微信 PC 端打开该聊天**让手机消息同步到电脑，再重新运行分析。
 
 ### 第二步：私聊分析
 
@@ -63,8 +66,11 @@ python private_chat/main.py prepare
 python private_chat/main.py contacts
 python private_chat/main.py contacts --search 张三
 
-# 分析指定联系人
+# 分析指定联系人（默认自动同步最新微信数据）
 python private_chat/main.py analyze "联系人备注或昵称"
+
+# 跳过同步，直接使用本地缓存
+python private_chat/main.py analyze "联系人" --no-sync
 ```
 
 输出目录：`output/private/<联系人名>/`
@@ -79,6 +85,9 @@ python group_chat/main.py groups --search 群名关键词
 # 分析指定群聊
 python group_chat/main.py analyze "群名称"
 python group_chat/main.py analyze "群名" --top 20 --json
+
+# 跳过自动同步
+python group_chat/main.py analyze "群名" --no-sync
 ```
 
 输出目录：`output/group/<群名>/`
@@ -122,6 +131,7 @@ wechat-chat-analytics/
 | `*_月度频率.png` | 每月聊天量趋势 |
 | `*_近期日频率.png` | 最近 90 天日聊天量 |
 | `*_时段分布.png` / `*_星期分布.png` | 时间分布 |
+| `*_聊天频次热力图.png` | 全量日频次日历热力图 + 星期×小时分布 |
 | `*_收发比例.png` | 我 vs 对方发送比例 |
 | `*_统计报告.txt` | 文字统计摘要 |
 | `*_性格与关注分析.txt` | 双方性格、语言特点、关注话题 |

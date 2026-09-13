@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from private_chat.stats import ChatStats, WEEKDAY_NAMES
@@ -30,6 +32,7 @@ def generate_charts(stats: ChatStats, output_dir: Path) -> list[Path]:
     saved.append(_chart_daily_recent(stats, output_dir / f"{prefix}_近期日频率.png"))
     saved.append(_chart_hourly_distribution(stats, output_dir / f"{prefix}_时段分布.png"))
     saved.append(_chart_weekday_distribution(stats, output_dir / f"{prefix}_星期分布.png"))
+    saved.append(_chart_frequency_heatmap(stats, output_dir / f"{prefix}_聊天频次热力图.png"))
 
     if stats.sent_count or stats.received_count:
         saved.append(_chart_sent_received(stats, output_dir / f"{prefix}_收发比例.png"))
@@ -141,6 +144,93 @@ def _chart_weekday_distribution(stats: ChatStats, path: Path) -> Path:
     ax.set_title(f"与 {stats.contact.display_name} 的星期分布")
     ax.set_ylabel("消息数")
     plt.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _chart_frequency_heatmap(stats: ChatStats, path: Path) -> Path:
+    """全量聊天记录频次热力图：日历日频次 + 星期×小时分布。"""
+    if not stats.by_day or not stats.first_message or not stats.last_message:
+        return path
+
+    start = stats.first_message.date()
+    end = stats.last_message.date()
+    span_days = (end - start).days + 1
+    start_monday = start - timedelta(days=start.weekday())
+
+    weeks: list[list[float]] = []
+    week_starts: list = []
+    current = start_monday
+    while current <= end:
+        week: list[float] = []
+        for dow in range(7):
+            day = current + timedelta(days=dow)
+            key = day.strftime("%Y-%m-%d")
+            if day < start or day > end:
+                week.append(np.nan)
+            else:
+                week.append(float(stats.by_day.get(key, 0)))
+        weeks.append(week)
+        week_starts.append(current)
+        current += timedelta(days=7)
+
+    cal_arr = np.array(weeks, dtype=float).T  # 7 × num_weeks
+    num_weeks = len(weeks)
+
+    wh_arr = np.zeros((7, 24))
+    for (wd, hr), cnt in stats.by_weekday_hour.items():
+        wh_arr[wd, hr] = cnt
+
+    fig_h = 7.5
+    fig_w = min(52, max(16, num_weeks * 0.24 + 6))
+    fig, (ax_cal, ax_wh) = plt.subplots(
+        2, 1, figsize=(fig_w, fig_h), gridspec_kw={"height_ratios": [1.2, 1], "hspace": 0.35}
+    )
+
+    cmap_cal = plt.cm.YlOrRd.copy()
+    cmap_cal.set_bad(color="#F0F0F0")
+    im_cal = ax_cal.imshow(cal_arr, aspect="auto", cmap=cmap_cal, interpolation="nearest")
+    ax_cal.set_yticks(range(7))
+    ax_cal.set_yticklabels(WEEKDAY_NAMES)
+    ax_cal.set_ylabel("星期")
+
+    month_ticks: list[int] = []
+    month_labels: list[str] = []
+    seen_months: set[tuple[int, int]] = set()
+    for i, ws in enumerate(week_starts):
+        for day_offset in range(7):
+            d = ws + timedelta(days=day_offset)
+            if start <= d <= end:
+                key = (d.year, d.month)
+                if key not in seen_months:
+                    seen_months.add(key)
+                    month_ticks.append(i)
+                    if d.year == start.year and d.year == end.year:
+                        month_labels.append(f"{d.month}月")
+                    else:
+                        month_labels.append(f"{d.year}/{d.month}")
+                break
+    ax_cal.set_xticks(month_ticks)
+    ax_cal.set_xticklabels(month_labels, fontsize=8)
+    ax_cal.set_title(
+        f"与 {stats.contact.display_name} 的聊天频次热力图（全量 {span_days} 天，{stats.total:,} 条消息）"
+        f"\n{start} ~ {end}",
+        fontsize=12,
+    )
+    fig.colorbar(im_cal, ax=ax_cal, label="日消息数", shrink=0.85, pad=0.02)
+
+    im_wh = ax_wh.imshow(wh_arr, aspect="auto", cmap="YlOrRd", interpolation="nearest")
+    ax_wh.set_yticks(range(7))
+    ax_wh.set_yticklabels(WEEKDAY_NAMES)
+    ax_wh.set_xticks(range(0, 24, 2))
+    ax_wh.set_xticklabels([f"{h:02d}:00" for h in range(0, 24, 2)])
+    ax_wh.set_xlabel("小时")
+    ax_wh.set_ylabel("星期")
+    ax_wh.set_title("星期 × 小时 发言分布（基于全部聊天记录汇总）")
+    fig.colorbar(im_wh, ax=ax_wh, label="消息数", shrink=0.85, pad=0.02)
+
+    fig.subplots_adjust(hspace=0.4)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path

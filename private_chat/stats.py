@@ -19,6 +19,7 @@ class ChatStats:
     by_day: dict[str, int] = field(default_factory=dict)
     by_hour: dict[int, int] = field(default_factory=dict)
     by_weekday: dict[int, int] = field(default_factory=dict)
+    by_weekday_hour: dict[tuple[int, int], int] = field(default_factory=dict)
     sent_count: int = 0
     received_count: int = 0
     first_message: datetime | None = None
@@ -78,6 +79,7 @@ def compute_stats(contact: Contact, messages: list[Message]) -> ChatStats:
     day_counter: Counter[str] = Counter()
     hour_counter: Counter[int] = Counter()
     weekday_counter: Counter[int] = Counter()
+    weekday_hour_counter: Counter[tuple[int, int]] = Counter()
 
     for msg in messages:
         type_counter[msg.type_name] += 1
@@ -99,10 +101,12 @@ def compute_stats(contact: Contact, messages: list[Message]) -> ChatStats:
         day_counter[dt.strftime("%Y-%m-%d")] += 1
         hour_counter[dt.hour] += 1
         weekday_counter[dt.weekday()] += 1
+        weekday_hour_counter[(dt.weekday(), dt.hour)] += 1
 
     stats.by_type = dict(type_counter)
     stats.by_month = dict(month_counter)
     stats.by_day = dict(day_counter)
     stats.by_hour = dict(hour_counter)
     stats.by_weekday = dict(weekday_counter)
+    stats.by_weekday_hour = dict(weekday_hour_counter)
     return stats
