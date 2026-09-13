@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from group_chat.group_stats.analyze import MemberStats, TYPE_ORDER, WEEKDAY_LABELS
+from group_chat.group_stats.analyze import (
+    GroupTimelineStats,
+    MemberStats,
+    TYPE_ORDER,
+    WEEKDAY_LABELS,
+)
 
 plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
@@ -26,6 +32,7 @@ def generate_group_charts(
     total_messages: int,
     output_dir: Path,
     *,
+    timeline: GroupTimelineStats | None = None,
     top_n: int = 15,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -40,6 +47,12 @@ def generate_group_charts(
     saved.append(_chart_hour_heatmap(group_name, top[:10], output_dir / f"{prefix}_成员时段热力图.png"))
     saved.append(_chart_type_stack(group_name, top[:10], output_dir / f"{prefix}_成员内容类型.png"))
     saved.append(_chart_weekday_distribution(group_name, ranked, output_dir / f"{prefix}_星期分布.png"))
+    if timeline:
+        saved.append(
+            _chart_frequency_heatmap(
+                group_name, timeline, output_dir / f"{prefix}_聊天频次热力图.png"
+            )
+        )
     return saved
 
 
@@ -145,6 +158,95 @@ def _chart_type_stack(group_name: str, members: list[MemberStats], path: Path) -
     ax.set_title(f"{group_name} — 成员内容类型构成")
     ax.legend(fontsize=8, ncol=3, loc="upper right")
     plt.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _chart_frequency_heatmap(
+    group_name: str, timeline: GroupTimelineStats, path: Path
+) -> Path:
+    """全量群聊记录频次热力图：日历日频次 + 星期×小时分布。"""
+    if not timeline.by_day or not timeline.first_active or not timeline.last_active:
+        return path
+
+    start = timeline.first_active.date()
+    end = timeline.last_active.date()
+    span_days = (end - start).days + 1
+    start_monday = start - timedelta(days=start.weekday())
+
+    weeks: list[list[float]] = []
+    week_starts: list = []
+    current = start_monday
+    while current <= end:
+        week: list[float] = []
+        for dow in range(7):
+            day = current + timedelta(days=dow)
+            key = day.strftime("%Y-%m-%d")
+            if day < start or day > end:
+                week.append(np.nan)
+            else:
+                week.append(float(timeline.by_day.get(key, 0)))
+        weeks.append(week)
+        week_starts.append(current)
+        current += timedelta(days=7)
+
+    cal_arr = np.array(weeks, dtype=float).T
+    num_weeks = len(weeks)
+
+    wh_arr = np.zeros((7, 24))
+    for (wd, hr), cnt in timeline.by_weekday_hour.items():
+        wh_arr[wd, hr] = cnt
+
+    fig_h = 7.5
+    fig_w = min(52, max(16, num_weeks * 0.24 + 6))
+    fig, (ax_cal, ax_wh) = plt.subplots(
+        2, 1, figsize=(fig_w, fig_h), gridspec_kw={"height_ratios": [1.2, 1], "hspace": 0.35}
+    )
+
+    cmap_cal = plt.cm.YlOrRd.copy()
+    cmap_cal.set_bad(color="#F0F0F0")
+    im_cal = ax_cal.imshow(cal_arr, aspect="auto", cmap=cmap_cal, interpolation="nearest")
+    ax_cal.set_yticks(range(7))
+    ax_cal.set_yticklabels(WEEKDAY_LABELS)
+    ax_cal.set_ylabel("星期")
+
+    month_ticks: list[int] = []
+    month_labels: list[str] = []
+    seen_months: set[tuple[int, int]] = set()
+    for i, ws in enumerate(week_starts):
+        for day_offset in range(7):
+            d = ws + timedelta(days=day_offset)
+            if start <= d <= end:
+                key = (d.year, d.month)
+                if key not in seen_months:
+                    seen_months.add(key)
+                    month_ticks.append(i)
+                    if d.year == start.year and d.year == end.year:
+                        month_labels.append(f"{d.month}月")
+                    else:
+                        month_labels.append(f"{d.year}/{d.month}")
+                break
+    ax_cal.set_xticks(month_ticks)
+    ax_cal.set_xticklabels(month_labels, fontsize=8)
+    ax_cal.set_title(
+        f"{group_name} 群聊频次热力图（全量 {span_days} 天，{timeline.total:,} 条消息）"
+        f"\n{start} ~ {end}",
+        fontsize=12,
+    )
+    fig.colorbar(im_cal, ax=ax_cal, label="日消息数", shrink=0.85, pad=0.02)
+
+    im_wh = ax_wh.imshow(wh_arr, aspect="auto", cmap="YlOrRd", interpolation="nearest")
+    ax_wh.set_yticks(range(7))
+    ax_wh.set_yticklabels(WEEKDAY_LABELS)
+    ax_wh.set_xticks(range(0, 24, 2))
+    ax_wh.set_xticklabels([f"{h:02d}:00" for h in range(0, 24, 2)])
+    ax_wh.set_xlabel("小时")
+    ax_wh.set_ylabel("星期")
+    ax_wh.set_title("星期 × 小时 发言分布（基于全部群聊记录汇总）")
+    fig.colorbar(im_wh, ax=ax_wh, label="消息数", shrink=0.85, pad=0.02)
+
+    fig.subplots_adjust(hspace=0.4)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path

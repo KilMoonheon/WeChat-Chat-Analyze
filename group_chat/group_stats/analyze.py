@@ -26,6 +26,37 @@ WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "�
 
 
 @dataclass
+class GroupTimelineStats:
+    total: int = 0
+    by_day: dict[str, int] = field(default_factory=dict)
+    by_weekday_hour: dict[tuple[int, int], int] = field(default_factory=dict)
+    first_active: datetime | None = None
+    last_active: datetime | None = None
+
+
+def analyze_group_timeline(messages: list[GroupMessage]) -> GroupTimelineStats:
+    """全群消息的时间分布（用于日期热力图）。"""
+    stats = GroupTimelineStats(total=len(messages))
+    day_counter: Counter[str] = Counter()
+    weekday_hour_counter: Counter[tuple[int, int]] = Counter()
+
+    for msg in messages:
+        if msg.create_time <= 0:
+            continue
+        dt = datetime.fromtimestamp(msg.create_time)
+        if stats.first_active is None or dt < stats.first_active:
+            stats.first_active = dt
+        if stats.last_active is None or dt > stats.last_active:
+            stats.last_active = dt
+        day_counter[dt.strftime("%Y-%m-%d")] += 1
+        weekday_hour_counter[(dt.weekday(), dt.hour)] += 1
+
+    stats.by_day = dict(day_counter)
+    stats.by_weekday_hour = dict(weekday_hour_counter)
+    return stats
+
+
+@dataclass
 class MemberStats:
     wxid: str
     display_name: str

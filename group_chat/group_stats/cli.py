@@ -14,7 +14,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from group_chat.group_stats.analyze import analyze_members, render_group_report
+from group_chat.group_stats.analyze import (
+    analyze_group_timeline,
+    analyze_members,
+    render_group_report,
+)
 from group_chat.group_stats.charts import generate_group_charts
 from group_chat.group_stats.config import DEFAULT_OUTPUT_DIR, ensure_output_dir
 from group_chat.group_stats.reader import collect_group_messages, list_groups
@@ -100,6 +104,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         return 1
 
     members = analyze_members(messages)
+    timeline = analyze_group_timeline(messages)
     report = render_group_report(group.display_name, members, len(messages))
     print()
     print(report)
@@ -111,7 +116,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     report_path.write_text(report, encoding="utf-8")
 
     charts = generate_group_charts(
-        group.display_name, members, len(messages), out_dir, top_n=args.top
+        group.display_name,
+        members,
+        len(messages),
+        out_dir,
+        timeline=timeline,
+        top_n=args.top,
     )
 
     personality_path = out_dir / f"{group.display_name.replace('/', '_')}_性格与关注分析.txt"
